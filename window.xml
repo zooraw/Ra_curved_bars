@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <View name="status_bar_window" interactive="false" composite_layer="true" view_layout="vertical" min_size="Point(11,125)" max_size="Point(11,125)" />
+</root>

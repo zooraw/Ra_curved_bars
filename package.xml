@@ -1,0 +1,5 @@
+<Package id="ra.curved-bars" name="Ra Curved Bars">
+  <Provides role="prk.status-bars" />
+  <Script src="drag.lua" />
+  <Script src="main.lua" />
+</Package>

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <View name="arc_input" capture_input="true" interactive="true" fill_color="transparent" />
+</root>
