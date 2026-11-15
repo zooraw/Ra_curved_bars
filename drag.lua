@@ -54,11 +54,11 @@ local function drag_axis(origin, target)
 	end
 end
 
-function ra_attach_curved_drag(view, handles, menu, kind, spec, placement)
+function ra_attach_curved_drag(view, handles, menu, kind, spec, placement, layout)
 	local own_key = "drag-pose-" .. kind
-	local bar_width, bar_height = ui.minimum_width(view), ui.minimum_height(view)
 	local scope, last_published, next_sample = nil, nil, 0
 	local published_x, published_y, published_width, published_height
+	local published_bar_width, published_bar_height
 	local gesture
 	local needs_anchor
 	local lock_key
@@ -69,7 +69,9 @@ function ra_attach_curved_drag(view, handles, menu, kind, spec, placement)
 	local toggle = ui.find(menu, "position_toggle")
 	local bulk = ui.find(menu, "position_bulk")
 	local lock_all = ui.find(menu, "position_lock_all")
-	local menu_width = ui.minimum_width(menu)
+	local shape = ui.find(menu, "position_shape")
+	local orientation = ui.find(menu, "position_orientation")
+	local column_width = ui.minimum_width(menu) - 2
 	local row_height = ui.minimum_height(toggle)
 	local pointer_x, pointer_y
 	local hovered_handle, tooltip
@@ -93,6 +95,10 @@ function ra_attach_curved_drag(view, handles, menu, kind, spec, placement)
 	ui.on_click(backdrop, close_menu)
 	ui.on_pointer_release(backdrop, "right", close_menu)
 	ui.align(menu, "start", "start")
+	for _, button in ipairs({ toggle, bulk, lock_all, shape, orientation }) do
+		ui.align(button, "start", "start")
+		ui.size(button, column_width, row_height)
+	end
 
 	local function shared_locks()
 		local value = lock_key and ui.storage.read(lock_key) or ""
@@ -152,9 +158,11 @@ function ra_attach_curved_drag(view, handles, menu, kind, spec, placement)
 		if not scope then return end
 		local width, height = ui.parent_width(view), ui.parent_height(view)
 		if width <= 0 or height <= 0 then return end
-		if x == published_x and y == published_y and width == published_width and height == published_height then return end
-		publish(scope .. table.concat({ width, height, x, y, bar_width, bar_height }, ","))
+		if x == published_x and y == published_y and width == published_width and height == published_height
+			and layout.width == published_bar_width and layout.height == published_bar_height then return end
+		publish(scope .. table.concat({ width, height, x, y, layout.width, layout.height }, ","))
 		published_x, published_y, published_width, published_height = x, y, width, height
+		published_bar_width, published_bar_height = layout.width, layout.height
 	end
 	local function finish_drag()
 		if gesture and gesture.final_x then placement:changed() end
@@ -173,6 +181,20 @@ function ra_attach_curved_drag(view, handles, menu, kind, spec, placement)
 	ui.on_click(toggle, function() choose_lock(lock_on_click, false) end)
 	ui.on_click(bulk, function() choose_lock(bulk_locks, true) end)
 	ui.on_click(lock_all, function() choose_lock(true, true) end)
+	ui.on_click(shape, function()
+		close_menu()
+		finish_drag()
+		layout.change(not layout.straight, layout.horizontal)
+	end)
+	ui.on_click(orientation, function()
+		close_menu()
+		finish_drag()
+		needs_anchor = false
+		layout.change(layout.straight, not layout.horizontal)
+	end)
+	local function place_button(button, column, row)
+		ui.place(button, 1 + column * column_width, 1 + row * row_height)
+	end
 	local function show_menu(x, y)
 		local locks = shared_locks()
 		bulk_locks = locks == all_unlocked
@@ -181,13 +203,28 @@ function ra_attach_curved_drag(view, handles, menu, kind, spec, placement)
 		ui.text(bulk, bulk_locks and "Lock all" or "Unlock all")
 		ui.visible(bulk, lock_key ~= nil)
 		ui.visible(lock_all, show_lock_all)
-		local rows = show_lock_all and 3 or lock_key and 2 or 1
+		ui.text(shape, layout.straight and "Curved" or "Straight")
+		ui.text(orientation, layout.horizontal and "Vertical" or "Horizontal")
+		local lock_rows = show_lock_all and 3 or lock_key and 2 or 1
+		local shape_column, shape_row = 0, lock_rows
+		local columns, rows = 1, lock_rows + 2
+		-- Use two columns to keep the menu inside a short horizontal bar.
+		if layout.horizontal then
+			shape_column, shape_row = 1, 0
+			columns, rows = 2, math.max(lock_rows, 2)
+		end
+		place_button(toggle, 0, 0)
+		place_button(bulk, 0, 1)
+		place_button(lock_all, 0, 2)
+		place_button(shape, shape_column, shape_row)
+		place_button(orientation, shape_column, shape_row + 1)
+		local menu_width = columns * column_width + 2
 		local menu_height = rows * row_height + 2
 		ui.size(menu, menu_width, menu_height)
-		local local_x = x and x - ui.x(view) or bar_width / 2
-		local local_y = y and y - ui.y(view) or bar_height / 2
-		ui.place(menu, math.max(0, math.min(local_x - menu_width / 2, bar_width - menu_width)),
-			math.max(0, math.min(local_y - menu_height / 2, bar_height - menu_height)))
+		local local_x = x and x - ui.x(view) or layout.width / 2
+		local local_y = y and y - ui.y(view) or layout.height / 2
+		ui.place(menu, math.max(0, math.min(local_x - menu_width / 2, layout.width - menu_width)),
+			math.max(0, math.min(local_y - menu_height / 2, layout.height - menu_height)))
 		lock_on_click = not is_locked(locks)
 		ui.text(toggle, lock_on_click and "Lock in place" or "Unlock")
 		if hovered_handle then ui.tooltip(hovered_handle, "") end
@@ -235,9 +272,9 @@ function ra_attach_curved_drag(view, handles, menu, kind, spec, placement)
 			local anchor_x, anchor_y, _, height, anchor_width, anchor_height = read_position(spec.anchor)
 			if anchor_x then
 				local below = anchor_y + anchor_height + 7
-				local above = anchor_y - bar_height - 7
-				local next_y = (below + bar_height <= height or above < 0) and below or above
-				local next_x = spec.mirrored and anchor_x + anchor_width - bar_width or anchor_x
+				local above = anchor_y - layout.height - 7
+				local next_y = (below + layout.height <= height or above < 0) and below or above
+				local next_x = spec.mirrored and anchor_x + anchor_width - layout.width or anchor_x
 				x, y = Move.place(view, next_x, next_y)
 				placement:changed()
 				needs_anchor = false
@@ -247,10 +284,10 @@ function ra_attach_curved_drag(view, handles, menu, kind, spec, placement)
 	end)
 
 	local function targets()
-		local x, y, width = read_position(spec.peer)
+		local x, y, width, _, peer_width, peer_height = read_position(spec.peer)
 		if not x then return end
-		-- Mirroring the entire frame also mirrors the visible arcs within it.
-		return width - x - bar_width, y
+		-- Pair centers stay aligned even when the bars have different orientations.
+		return width - x - (peer_width + layout.width) / 2, y + (peer_height - layout.height) / 2
 	end
 
 	local function on_pointer(handle, phase, x, y)
@@ -317,7 +354,7 @@ function ra_attach_curved_drag(view, handles, menu, kind, spec, placement)
 		if spec.anchor then
 			local pose = placement.intended
 			-- Stock XP frames were narrower. Choose a new default for that layout.
-			needs_anchor = not is_locked() and (not pose or pose.width < bar_width)
+			needs_anchor = not is_locked() and (not pose or pose.width < math.min(layout.width, layout.height))
 		end
 	end
 	local function update_tooltip(text)

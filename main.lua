@@ -1,8 +1,10 @@
 local Vitals = ui.require("character.vitals")
 local root = ui.load("window.xml")
 ui.root(root)
-local restore_position, update_tooltip
+local restore_position, update_tooltip, apply_layout
 local frame_field = "RaCurvedBarFrame"
+local straight_field, horizontal_field = "RaBarStraight", "RaBarHorizontal"
+local layout = { straight = false, horizontal = false }
 local placement = ui.require("core.placement").attach(root, {
 	only_moved = true,
 	field = frame_field,
@@ -13,12 +15,20 @@ local placement = ui.require("core.placement").attach(root, {
 
 local native_restore = placement.restore
 function placement:restore(reset)
+	if apply_layout then
+		apply_layout(not reset and ui.state.read(root, straight_field) == "true",
+			not reset and ui.state.read(root, horizontal_field) == "true")
+	end
+	if reset then
+		ui.state.write(root, straight_field, "false", "bool")
+		ui.state.write(root, horizontal_field, "false", "bool")
+	end
 	-- Read the old shared frame once so existing curved layouts can carry over.
 	local migrate = not reset and ui.state.read(root, frame_field) == ""
 	if migrate then self.options.field = "WindowFrame" end
 	native_restore(self, reset)
 	self.options.field = frame_field
-	if reset or (migrate and self.intended and self.intended.width >= ui.minimum_width(root)) then
+	if reset or (migrate and self.intended and self.intended.width >= math.min(ui.minimum_width(root), ui.minimum_height(root))) then
 		self:changed()
 	end
 end
@@ -31,12 +41,16 @@ local specs = {
 	experience = { label = "Experience", color = "D4A636", x = left_x, peer = "alien", anchor = "health" },
 	alien = { label = "Alien Experience", color = "63A84C", x = right_x, peer = "experience", mirrored = true, anchor = "nano" },
 }
-local scale, bar_width, bar_height
-local spec, bar
-local curved
+local scale, cross_size, length
+local cross_offset, mirror_stroke
+local spec, bar, arc, notches, input, maximum, zero
+local strips, fill_rows, empty_rows
+local handles = {}
+local fraction, last_maximum = 0, nil
 local arc_midpoint, arc_half_height, arc_bow = 88, 74, 28
 local arc_radius = (arc_half_height ^ 2 + arc_bow ^ 2) / (2 * arc_bow)
-local arc_center_x = 10 + arc_radius
+local bar_center = 10
+local arc_center_x = bar_center + arc_radius
 local outline_radius, fill_radius = 6, 4
 local stroke_width_scale = 1.15
 local fill_top = arc_midpoint - arc_half_height - fill_radius
@@ -44,10 +58,15 @@ local fill_bottom = arc_midpoint + arc_half_height + fill_radius
 
 local function stroke_span(y, thickness)
 	local dy = math.abs(y / scale - arc_midpoint)
+	if layout.straight then
+		local past_end = math.max(0, dy - arc_half_height)
+		local half_width = math.sqrt(math.max(0, thickness ^ 2 - past_end ^ 2)) * stroke_width_scale
+		return (bar_center - half_width) * scale, (bar_center + half_width) * scale
+	end
 	local outer, inner = arc_radius + thickness, arc_radius - thickness
 	-- Each circular edge meets the round end cap at its own tangent point.
 	local cap = math.sqrt(math.max(0, thickness ^ 2 - (dy - arc_half_height) ^ 2))
-	local end_x = 10 + arc_bow
+	local end_x = bar_center + arc_bow
 	local left = dy <= arc_half_height * outer / arc_radius
 		and arc_center_x - math.sqrt(outer ^ 2 - dy ^ 2) or end_x - cap
 	local right = dy <= arc_half_height * inner / arc_radius
@@ -56,14 +75,28 @@ local function stroke_span(y, thickness)
 	return (left - extra) * scale, (right + extra) * scale
 end
 
+local function place_rectangle(view, x, y, width, height)
+	x = x + cross_offset
+	if mirror_stroke then x = cross_size - x - width end
+	if layout.horizontal then
+		-- The top row is the maximum. Put it on the left for Health and Nano.
+		local horizontal_x = spec.anchor and length - y - height or y
+		ui.size(view, height, width)
+		ui.place(view, horizontal_x, x)
+	else
+		ui.size(view, width, height)
+		ui.place(view, x, y)
+	end
+end
+
 local function add_strip(parent, y, left, right, height, color)
 	local strip = ui.load("arc_strip.xml")
 	ui.add(parent, strip)
 	ui.fill_color(strip, color)
 	local x = math.floor(left + 0.5)
 	local width = math.floor(right + 0.5) - x
-	ui.size(strip, width, height)
-	ui.place(strip, spec.mirrored and bar_width - x - width or x, y)
+	place_rectangle(strip, x, y, width, height)
+	strips[#strips + 1] = strip
 	return strip
 end
 
@@ -114,7 +147,7 @@ local function draw_stroke(arc, thickness, color, fill_rows)
 						strips[#strips + 1] = strip
 					else
 						-- A static outline run can span consecutive rows with the same coverage.
-						local key = (start * bar_width + x) * 256 + previous
+						local key = (start * cross_size + x) * 256 + previous
 						local run = outline_runs[key]
 						if run and run.bottom < y then
 							add_strip(arc, run.y, start, x, run.bottom - run.y, paint)
@@ -136,13 +169,9 @@ local function draw_stroke(arc, thickness, color, fill_rows)
 	end
 end
 
-local function build_arc(content, color)
-	local arc = ui.find(content, "arc")
-	ui.size(arc, bar_width, bar_height)
+local function build_stroke(color)
 	draw_stroke(arc, outline_radius, "000000")
-	draw_stroke(arc, fill_radius, color, curved.segments)
-	local notches = ui.find(content, "notches")
-	ui.size(notches, bar_width, bar_height)
+	draw_stroke(arc, fill_radius, color, fill_rows)
 	for index = 1, 9 do
 		local y = (fill_bottom - (fill_bottom - fill_top) * index / 10) * scale
 		local left, right = stroke_span(y, fill_radius)
@@ -150,35 +179,36 @@ local function build_arc(content, color)
 	end
 end
 
-local function build_input(content)
-	local handles = {}
-	ui.size(content, bar_width, bar_height)
+local function layout_input()
 	local top = math.floor((arc_midpoint - arc_half_height - outline_radius) * scale)
 	local bottom = math.ceil((arc_midpoint + arc_half_height + outline_radius) * scale)
 	-- Follow the outline in short bands so transparent space does not cover neighboring bars.
+	local index = 0
 	for y = top, bottom - 1, 12 do
+		index = index + 1
 		local stop = math.min(y + 12, bottom)
 		local middle = math.max(y, math.min(arc_midpoint * scale, stop))
-		local left = stroke_span(middle, outline_radius)
-		local _, right_start = stroke_span(y, outline_radius)
-		local _, right_end = stroke_span(stop, outline_radius)
-		left = math.max(0, math.floor(left) - 2)
-		local right = math.ceil(math.max(right_start, right_end)) + 2
-		local handle = ui.load("arc_input.xml")
-		ui.add(content, handle)
-		ui.size(handle, right - left, stop - y)
-		ui.place(handle, spec.mirrored and bar_width - right or left, y)
-		handles[#handles + 1] = handle
+		local left_middle, right_middle = stroke_span(middle, outline_radius)
+		local left_start, right_start = stroke_span(y, outline_radius)
+		local left_end, right_end = stroke_span(stop, outline_radius)
+		local left = math.max(0, math.floor(math.min(left_middle, left_start, left_end)) - 2)
+		local right = math.ceil(math.max(right_middle, right_start, right_end)) + 2
+		local handle = handles[index]
+		if not handle then
+			handle = ui.load("arc_input.xml")
+			ui.add(input, handle)
+			handles[index] = handle
+		end
+		place_rectangle(handle, left, y, right - left, stop - y)
 	end
-	return handles
 end
 
 local function show_arc_fill(fraction)
-	local rows = curved.segments
+	local rows = fill_rows
 	local empty = (1 - math.max(0, math.min(1, fraction))) * #rows
-	local previous = curved.empty or #rows
+	local previous = empty_rows or #rows
 	if empty == previous then return end
-	curved.empty = empty
+	empty_rows = empty
 	-- Only the rows swept by the moving fill edge can change.
 	local first = math.floor(math.min(previous, empty)) + 1
 	local last = math.ceil(math.max(previous, empty))
@@ -190,48 +220,99 @@ local function show_arc_fill(fraction)
 	end
 end
 
+local function layout_numbers()
+	if spec.anchor then return end
+	local side = (layout.straight and 20 or 48) * scale
+	local edge = 7 * scale
+	if layout.horizontal then side = cross_size / 2 + 8 * scale end
+	local near = mirror_stroke and 0 or side
+	local far = mirror_stroke and side or 0
+	local align = mirror_stroke and "end" or "start"
+	if layout.horizontal then
+		ui.borders(maximum, edge, near, 0, far)
+		ui.align(maximum, "start", align)
+		ui.borders(zero, 0, near, edge, far)
+		ui.align(zero, "end", align)
+	else
+		ui.borders(maximum, near, edge, far, 0)
+		ui.align(maximum, align, "start")
+		ui.borders(zero, near, 0, far, edge)
+		ui.align(zero, align, "end")
+	end
+end
+
+apply_layout = function(straight, horizontal)
+	local resize = not layout.width or horizontal ~= layout.horizontal
+	if not resize and straight == layout.straight then return end
+	layout.straight, layout.horizontal = straight, horizontal
+	local center_horizontal = horizontal and not spec.anchor
+	-- Health and Nano share an endpoint height. Curved versions bow to opposite sides of it.
+	local end_center = (straight and bar_center or bar_center + arc_bow) * scale
+	cross_offset = center_horizontal and math.floor(cross_size / 2 - end_center + 0.5) or 0
+	mirror_stroke = spec.mirrored and not (center_horizontal and straight)
+	if resize then
+		layout.width = horizontal and length or cross_size
+		layout.height = horizontal and cross_size or length
+		for _, view in ipairs({ root, bar, arc, notches, input }) do
+			ui.size(view, layout.width, layout.height)
+		end
+	end
+	layout_numbers()
+	layout_input()
+	if strips then
+		for _, strip in ipairs(strips) do ui.destroy(strip) end
+	end
+	strips, fill_rows, empty_rows = {}, {}, nil
+	build_stroke(spec.color)
+	show_arc_fill(fraction)
+end
+
+function layout.change(straight, horizontal)
+	local rotate = horizontal ~= layout.horizontal
+	local reshape = straight ~= layout.straight
+	local old_width, old_height = layout.width, layout.height
+	local x, y = ui.offset_x(root), ui.offset_y(root)
+	apply_layout(straight, horizontal)
+	if reshape then ui.state.write(root, straight_field, tostring(straight), "bool") end
+	if rotate then
+		-- Keep the same center when the frame swaps width and height.
+		ui.place(root, x + (old_width - layout.width) / 2, y + (old_height - layout.height) / 2)
+		placement:changed()
+		ui.state.write(root, horizontal_field, tostring(horizontal), "bool")
+	end
+end
+
 function status_bar_initialize(kind)
 	spec = assert(specs[kind], "Unknown player status bar")
 	scale = full_scale * (spec.anchor and 0.75 or 1)
-	bar_width, bar_height = math.ceil(86 * scale), 176 * scale
-	local content = ui.load("arc.xml")
-	ui.add(root, content)
-	bar = ui.find(content, "status_bar")
-	curved = { segments = {} }
-	local maximum = ui.find(content, "scale_maximum")
-	local zero = ui.find(content, "scale_zero")
+	cross_size, length = math.ceil(86 * scale), 176 * scale
+	bar = ui.load("arc.xml")
+	ui.add(root, bar)
+	arc, notches = ui.find(bar, "arc"), ui.find(bar, "notches")
+	input = ui.find(bar, "input_regions")
+	maximum, zero = ui.find(bar, "scale_maximum"), ui.find(bar, "scale_zero")
 	if spec.anchor then
 		ui.visible(maximum, false)
 		ui.visible(zero, false)
 	else
-		curved.scale_maximum = maximum
-		local left = spec.mirrored and 0 or 48 * scale
-		local right = spec.mirrored and 48 * scale or 0
-		local align = spec.mirrored and "end" or "start"
 		ui.font_size(maximum, 11 * scale)
 		ui.font_size(zero, 11 * scale)
-		ui.borders(maximum, left, 7 * scale, right, 0)
-		ui.align(maximum, align, "start")
-		ui.borders(zero, left, 0, right, 7 * scale)
-		ui.align(zero, align, "end")
 	end
-	ui.size(bar, bar_width, bar_height)
-	build_arc(content, spec.color)
-	ui.size(root, bar_width, bar_height)
+	apply_layout(false, false)
 	ui.fill_color(root, "")
 	ui.composite(root, false)
 	ui.place(root, spec.x, spec.anchor and 12 + 176 * full_scale or 5)
-	local handles = build_input(ui.find(bar, "input_regions"))
-	restore_position, update_tooltip = ra_attach_curved_drag(root, handles, ui.find(bar, "position_menu"), kind, spec, placement)
+	restore_position, update_tooltip = ra_attach_curved_drag(root, handles, ui.find(bar, "position_menu"), kind, spec, placement, layout)
 end
 
 function status_bar_apply(reading, shadowknowledge)
-	show_arc_fill(reading.fraction)
-	if curved.scale_maximum then
-		local maximum = reading.maximum_known and tostring(reading.maximum) or "--"
-		if curved.maximum ~= maximum then
-			ui.text(curved.scale_maximum, maximum)
-			curved.maximum = maximum
+	fraction = reading.fraction
+	show_arc_fill(fraction)
+	if not spec.anchor then
+		local text = reading.maximum_known and tostring(reading.maximum) or "--"
+		if last_maximum ~= text then
+			ui.text(maximum, text)
+			last_maximum = text
 		end
 	end
 	update_tooltip((shadowknowledge and "Shadowknowledge" or spec.label) .. ": " .. Vitals.reading_text(reading))
