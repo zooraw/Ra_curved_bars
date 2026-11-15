@@ -69,7 +69,8 @@ function ra_attach_curved_drag(view, handles, menu, kind, spec, placement, layou
 	local toggle = ui.find(menu, "position_toggle")
 	local bulk = ui.find(menu, "position_bulk")
 	local lock_all = ui.find(menu, "position_lock_all")
-	local shape = ui.find(menu, "position_shape")
+	local straight = ui.find(menu, "position_straight")
+	local curved = ui.find(menu, "position_curved")
 	local orientation = ui.find(menu, "position_orientation")
 	local column_width = ui.minimum_width(menu) - 2
 	local row_height = ui.minimum_height(toggle)
@@ -95,7 +96,7 @@ function ra_attach_curved_drag(view, handles, menu, kind, spec, placement, layou
 	ui.on_click(backdrop, close_menu)
 	ui.on_pointer_release(backdrop, "right", close_menu)
 	ui.align(menu, "start", "start")
-	for _, button in ipairs({ toggle, bulk, lock_all, shape, orientation }) do
+	for _, button in ipairs({ toggle, bulk, lock_all, straight, curved, orientation }) do
 		ui.align(button, "start", "start")
 		ui.size(button, column_width, row_height)
 	end
@@ -181,16 +182,22 @@ function ra_attach_curved_drag(view, handles, menu, kind, spec, placement, layou
 	ui.on_click(toggle, function() choose_lock(lock_on_click, false) end)
 	ui.on_click(bulk, function() choose_lock(bulk_locks, true) end)
 	ui.on_click(lock_all, function() choose_lock(true, true) end)
-	ui.on_click(shape, function()
+	local function choose_layout(is_straight, horizontal, reversed)
 		close_menu()
 		finish_drag()
-		layout.change(not layout.straight, layout.horizontal)
+		if horizontal ~= layout.horizontal then needs_anchor = false end
+		layout.change(is_straight, horizontal, reversed)
+	end
+	ui.on_click(straight, function()
+		choose_layout(true, layout.horizontal, layout.reversed)
+	end)
+	ui.on_click(curved, function()
+		local reversed = layout.reversed
+		if not layout.straight then reversed = not reversed end
+		choose_layout(false, layout.horizontal, reversed)
 	end)
 	ui.on_click(orientation, function()
-		close_menu()
-		finish_drag()
-		needs_anchor = false
-		layout.change(layout.straight, not layout.horizontal)
+		choose_layout(layout.straight, not layout.horizontal, layout.reversed)
 	end)
 	local function place_button(button, column, row)
 		ui.place(button, 1 + column * column_width, 1 + row * row_height)
@@ -203,21 +210,21 @@ function ra_attach_curved_drag(view, handles, menu, kind, spec, placement, layou
 		ui.text(bulk, bulk_locks and "Lock all" or "Unlock all")
 		ui.visible(bulk, lock_key ~= nil)
 		ui.visible(lock_all, show_lock_all)
-		ui.text(shape, layout.straight and "Curved" or "Straight")
 		ui.text(orientation, layout.horizontal and "Vertical" or "Horizontal")
 		local lock_rows = show_lock_all and 3 or lock_key and 2 or 1
 		local shape_column, shape_row = 0, lock_rows
-		local columns, rows = 1, lock_rows + 2
+		local columns, rows = 1, lock_rows + 3
 		-- Use two columns to keep the menu inside a short horizontal bar.
 		if layout.horizontal then
 			shape_column, shape_row = 1, 0
-			columns, rows = 2, math.max(lock_rows, 2)
+			columns, rows = 2, 3
 		end
 		place_button(toggle, 0, 0)
 		place_button(bulk, 0, 1)
 		place_button(lock_all, 0, 2)
-		place_button(shape, shape_column, shape_row)
-		place_button(orientation, shape_column, shape_row + 1)
+		place_button(straight, shape_column, shape_row)
+		place_button(curved, shape_column, shape_row + 1)
+		place_button(orientation, shape_column, shape_row + 2)
 		local menu_width = columns * column_width + 2
 		local menu_height = rows * row_height + 2
 		ui.size(menu, menu_width, menu_height)

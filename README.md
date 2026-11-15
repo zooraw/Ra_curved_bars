@@ -4,7 +4,7 @@ Spiritech player status-bar provider. The red Health bar bows left and the blue 
 
 Each pair has its own snap targets. When both bars in a pair are visible, dragging slows near the other bar's height and its mirrored position across the screen's centerline. Release close to either point to snap exactly into place. Each direction snaps independently, and dragging farther lets you place the bar freely.
 
-Right-click a visible bar to open its menu. Choose **Straight** or **Curved** for its shape and **Horizontal** or **Vertical** for its orientation. Each bar saves its own choices for the current character. Horizontal Health and Nano fill from right to left, with the maximum on the left. Horizontal XP bars fill from left to right, and vertical bars fill upward.
+Right-click a visible bar to open its menu. Choose **Straight** or **Curved** for its shape and **Horizontal** or **Vertical** for its orientation. Choose **Curved** again to flip the curve. Each bar saves its own choices for the current character. Horizontal Health and Nano fill from right to left, with the maximum on the left. Horizontal XP bars fill from left to right, and vertical bars fill upward.
 
 Choose **Lock in place** or **Unlock** for the selected bar. The menu offers **Lock all** when bars can be locked and **Unlock all** when bars can be unlocked. These actions include hidden bars. Click outside the menu to dismiss it. Lock settings are saved for the current character.
 

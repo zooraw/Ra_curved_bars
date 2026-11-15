@@ -4,7 +4,8 @@ ui.root(root)
 local restore_position, update_tooltip, apply_layout
 local frame_field = "RaCurvedBarFrame"
 local straight_field, horizontal_field = "RaBarStraight", "RaBarHorizontal"
-local layout = { straight = false, horizontal = false }
+local reverse_field = "RaBarCurveReversed"
+local layout = { straight = false, horizontal = false, reversed = false }
 local placement = ui.require("core.placement").attach(root, {
 	only_moved = true,
 	field = frame_field,
@@ -17,11 +18,13 @@ local native_restore = placement.restore
 function placement:restore(reset)
 	if apply_layout then
 		apply_layout(not reset and ui.state.read(root, straight_field) == "true",
-			not reset and ui.state.read(root, horizontal_field) == "true")
+			not reset and ui.state.read(root, horizontal_field) == "true",
+			not reset and ui.state.read(root, reverse_field) == "true")
 	end
 	if reset then
 		ui.state.write(root, straight_field, "false", "bool")
 		ui.state.write(root, horizontal_field, "false", "bool")
+		ui.state.write(root, reverse_field, "false", "bool")
 	end
 	-- Read the old shared frame once so existing curved layouts can carry over.
 	local migrate = not reset and ui.state.read(root, frame_field) == ""
@@ -241,15 +244,18 @@ local function layout_numbers()
 	end
 end
 
-apply_layout = function(straight, horizontal)
+apply_layout = function(straight, horizontal, reversed)
 	local resize = not layout.width or horizontal ~= layout.horizontal
-	if not resize and straight == layout.straight then return end
+	local flip = not straight and reversed ~= layout.reversed
+	layout.reversed = reversed
+	if not resize and straight == layout.straight and not flip then return end
 	layout.straight, layout.horizontal = straight, horizontal
 	local center_horizontal = horizontal and not spec.anchor
 	-- Health and Nano share an endpoint height. Curved versions bow to opposite sides of it.
 	local end_center = (straight and bar_center or bar_center + arc_bow) * scale
 	cross_offset = center_horizontal and math.floor(cross_size / 2 - end_center + 0.5) or 0
 	mirror_stroke = spec.mirrored and not (center_horizontal and straight)
+	if not straight and reversed then mirror_stroke = not mirror_stroke end
 	if resize then
 		layout.width = horizontal and length or cross_size
 		layout.height = horizontal and cross_size or length
@@ -267,13 +273,15 @@ apply_layout = function(straight, horizontal)
 	show_arc_fill(fraction)
 end
 
-function layout.change(straight, horizontal)
+function layout.change(straight, horizontal, reversed)
 	local rotate = horizontal ~= layout.horizontal
 	local reshape = straight ~= layout.straight
+	local flip = reversed ~= layout.reversed
 	local old_width, old_height = layout.width, layout.height
 	local x, y = ui.offset_x(root), ui.offset_y(root)
-	apply_layout(straight, horizontal)
+	apply_layout(straight, horizontal, reversed)
 	if reshape then ui.state.write(root, straight_field, tostring(straight), "bool") end
+	if flip then ui.state.write(root, reverse_field, tostring(reversed), "bool") end
 	if rotate then
 		-- Keep the same center when the frame swaps width and height.
 		ui.place(root, x + (old_width - layout.width) / 2, y + (old_height - layout.height) / 2)
@@ -298,7 +306,7 @@ function status_bar_initialize(kind)
 		ui.font_size(maximum, 11 * scale)
 		ui.font_size(zero, 11 * scale)
 	end
-	apply_layout(false, false)
+	apply_layout(false, false, false)
 	ui.fill_color(root, "")
 	ui.composite(root, false)
 	ui.place(root, spec.x, spec.anchor and 12 + 176 * full_scale or 5)

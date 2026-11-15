@@ -10,7 +10,8 @@
       <TextButton name="position_toggle" label="Lock in place" min_size="Point(-1,23)" text_alignment="center" font_size="12" color="White" hover_color="FFFFFF" pressed_color="A7E0FF" interactive="true" capture_input="true" />
       <TextButton name="position_bulk" label="Unlock all" min_size="Point(-1,23)" text_alignment="center" font_size="12" color="White" hover_color="FFFFFF" pressed_color="A7E0FF" interactive="true" capture_input="true" />
       <TextButton name="position_lock_all" label="Lock all" min_size="Point(-1,23)" text_alignment="center" font_size="12" color="White" hover_color="FFFFFF" pressed_color="A7E0FF" interactive="true" capture_input="true" />
-      <TextButton name="position_shape" label="Straight" min_size="Point(-1,23)" text_alignment="center" font_size="12" color="White" hover_color="FFFFFF" pressed_color="A7E0FF" interactive="true" capture_input="true" />
+      <TextButton name="position_straight" label="Straight" min_size="Point(-1,23)" text_alignment="center" font_size="12" color="White" hover_color="FFFFFF" pressed_color="A7E0FF" interactive="true" capture_input="true" />
+      <TextButton name="position_curved" label="Curved" min_size="Point(-1,23)" text_alignment="center" font_size="12" color="White" hover_color="FFFFFF" pressed_color="A7E0FF" interactive="true" capture_input="true" />
       <TextButton name="position_orientation" label="Horizontal" min_size="Point(-1,23)" text_alignment="center" font_size="12" color="White" hover_color="FFFFFF" pressed_color="A7E0FF" interactive="true" capture_input="true" />
     </BorderView>
   </View>
